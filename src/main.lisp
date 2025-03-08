@@ -126,10 +126,13 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defun run-ops (ops)
-  (dolist (op ops)
-    (case (car op)
-      (set (key-value:put-value (cadr op) (caddr op)))
-      (get (format t "Value = ~a~%" (key-value:get-value (cadr op)))))))
+  (mapcar (lambda (op)
+            (case (car op)
+              (set (progn
+                     (key-value:put-value (cadr op) (caddr op))
+                     'ok))
+              (get (cons (cadr op) (key-value:get-value (cadr op))))))
+          ops))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -146,8 +149,7 @@
                                (let* ((buffer (make-array 1024 :element-type '(unsigned-byte 8)))
                                       (ops (naive-decode-msg buffer stream)))
                                  (format t "[SERVER] This is the message: ~a~%" ops)
-                                 (run-ops ops))
-                               (send-msg "Done!" socket)
+                                 (send-msg (princ-to-string (run-ops ops)) socket))
                                (format t "[SERVER] That was it.~%"))
                              :event-cb (lambda (err) (format t "[SERVER] Event: ~a~%" err))
                              :stream t))
@@ -175,7 +177,7 @@
            (as:exit-event-loop)))
     :event-cb (lambda (event) (format t "[CLIENT] Event received: ~a~%" event))
     :stream t
-    :data (naive-encode-msg '((SET one 1) (GET one)))
+    :data (naive-encode-msg '((SET one 1) (GET one) (SET one "dog") (GET one)))
     :read-timeout 5))
 
 (defun launch-client (port)
