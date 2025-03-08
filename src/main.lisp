@@ -1,7 +1,8 @@
 (defpackage cledis
   (:use :cl :usocket :bt-semaphore)
   (:local-nicknames (:us :usocket)
-                    (:as :cl-async)))
+                    (:as :cl-async))
+  (:export #:server #:client))
 (in-package :cledis)
 
 ;; TODOs
@@ -141,7 +142,8 @@
 
 (defvar *server* nil)
 
-(defun server (port)
+(defun start-server (port)
+  (format t "Starting Server~%")
   (setf *server* 
         (cl-async:tcp-server nil port
                              (lambda (socket stream)
@@ -156,6 +158,8 @@
   (cl-async:signal-handler 2 (lambda (sig)
                                (declare (ignore sig))
                                (cl-async:exit-event-loop))))
+(defun stop-server ()
+  (when *server* (as:close-tcp-server *server*)))
 
 (defun launch-async-server (port)
   (when *server*
@@ -163,25 +167,35 @@
     (as:close-tcp-server *server*)
     (setf *server* nil))
   (bt:make-thread (lambda ()
-                    (cl-async:start-event-loop (lambda () (server port)))) :name "Server"))
+                    (cl-async:start-event-loop (lambda () (start-server port)))) :name "Server"))
+
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Client
+;; client
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defun client (port)
+(defun start-client (port query)
   (as:tcp-connect "127.0.0.1" port
-    (lambda (socket stream)
-         (let ((buffer (make-array 1024 :element-type '(unsigned-byte 8))))
-           (format t "[CLIENT] Respose: ~a~%" (rec-msg buffer stream))
-           (as:exit-event-loop)))
-    :event-cb (lambda (event) (format t "[CLIENT] Event received: ~a~%" event))
-    :stream t
-    :data (naive-encode-msg '((SET one 1) (GET one) (SET one "dog") (GET one)))
-    :read-timeout 5))
+                  (lambda (socket stream)
+                    (declare (ignore socket))
+                    (let ((buffer (make-array 1024 :element-type '(unsigned-byte 8))))
+                      (format t "[CLIENT] Respose: ~a~%" (rec-msg buffer stream))
+                      (as:exit-event-loop)))
+                  :event-cb (lambda (event) (format t "[CLIENT] Event received: ~a~%" event))
+                  :stream t
+                  :data (naive-encode-msg query)
+                  :read-timeout 5))
+
+;; TODO This should be done using promises instead
+;; http://orthecreedence.github.io/blackbird/
+(defun run-query (port query)
+   (as:start-event-loop (lambda () (start-client port query))))
+
 
 (defun launch-client (port)
-  (bt:make-thread (lambda () (as:start-event-loop (lambda () (client port)))) :name "Client"))
+  (let ((query '((SET one 1) (GET one) (SET one "dog") (GET one))))
+    (bt:make-thread (lambda () (as:start-event-loop (lambda () (start-client port query)))) :name "Client")))
 
 
 
@@ -205,4 +219,40 @@
   (bt:make-thread (lambda () (create-bin-client port)) :name "Client"))
 
 
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; entry points 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defun server ()
+  (flamegraph:save-flame-graph ("~/server.stack")
+    (when *server*
+      (format t "Restarting Server~%")
+      (as:close-tcp-server *server*)
+      (setf *server* nil))
+    (handler-case
+        (cl-async:start-event-loop (lambda () (start-server 12342)))
+      (error (c)
+        (format t "ERROR: ~a~%" c)))))
+
+(defun run-client (name times) 
+  (bt:make-thread (lambda ()
+                    (format t "Running ~a!~%" name)
+                    (dotimes (n times)
+                      (handler-case 
+                          (run-query 12342 `((set ,(format nil "~a~a" name n) ,n) (get ,(format nil "~a~a" name n))))
+                        (error (c)
+                          (format t "ERROR: ~a~%" c)))))
+                  :name name))
+
+(defun client ()
+  (let ((t1 (run-client "one" 10000))
+        (t2 (run-client "two" 10000))
+        (t3 (run-client "three" 10000))
+        (t4 (run-client "four" 10000)))
+    (bt:join-thread t1)
+    (bt:join-thread t2)
+    (bt:join-thread t3)
+    (bt:join-thread t4)))
 

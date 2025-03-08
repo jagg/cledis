@@ -2,7 +2,7 @@
   :version "0.1.0"
   :author ""
   :license ""
-  :depends-on (:bt-semaphore :usocket :cl-async)
+  :depends-on (:bt-semaphore :usocket :cl-async :flamegraph)
   :components ((:module "src"
                 :components
                 ((:file "main" :depends-on ("key-value"))
